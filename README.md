@@ -120,12 +120,18 @@ java -jar analyzer-report/target/analyzer-report-1.0.0-SNAPSHOT.jar \
   --jars /path/to/your/project/target/dependency
 ```
 
-Multiple JSON files (e.g., from concurrent Surefire forks) can be comma-separated:
+The `--runtime` argument accepts a single file, a directory (loads all `*.json` inside),
+or comma-separated paths mixing both:
 
 ```bash
-java -jar analyzer-report.jar \
-  --runtime result-fork-1.json,result-fork-2.json \
-  --jars target/dependency
+# Single file
+java -jar analyzer-report.jar --runtime /tmp/analysis/runtime-analysis-result.json --jars target/dependency
+
+# Directory (loads all *.json files)
+java -jar analyzer-report.jar --runtime /tmp/analysis --jars target/dependency
+
+# Multiple files (e.g., from concurrent Surefire forks)
+java -jar analyzer-report.jar --runtime result-fork-1.json,result-fork-2.json --jars target/dependency
 ```
 
 Output:
@@ -208,11 +214,11 @@ Surefire's `${surefire.forkNumber}` to avoid output collisions:
 ```
 
 This produces separate files: `runtime-analysis-result-fork-1.json`,
-`runtime-analysis-result-fork-2.json`, etc. Pass them all to the report tool:
+`runtime-analysis-result-fork-2.json`, etc. Point the report tool at the directory:
 
 ```bash
 java -jar analyzer-report.jar \
-  --runtime target/classpath-analysis/runtime-analysis-result-fork-1.json,target/classpath-analysis/runtime-analysis-result-fork-2.json \
+  --runtime target/classpath-analysis \
   --jars target/dependency
 ```
 

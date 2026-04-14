@@ -3,6 +3,8 @@ package org.nubarchiva.classpathanalyzer.report;
 import org.nubarchiva.classpathanalyzer.common.model.RuntimeAnalysisResult;
 import org.nubarchiva.classpathanalyzer.common.util.JsonSerializer;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
@@ -25,7 +27,19 @@ public class ReportMain {
             switch (args[i]) {
                 case "--runtime":
                     for (var part : args[++i].split(",")) {
-                        runtimeJsons.add(Path.of(part.trim()));
+                        Path path = Path.of(part.trim());
+                        if (Files.isDirectory(path)) {
+                            try (var stream = Files.newDirectoryStream(path, "*.json")) {
+                                for (Path jsonFile : stream) {
+                                    runtimeJsons.add(jsonFile);
+                                }
+                            } catch (IOException e) {
+                                System.err.println("ERROR: cannot read directory " + path + ": " + e.getMessage());
+                                System.exit(1);
+                            }
+                        } else {
+                            runtimeJsons.add(path);
+                        }
                     }
                     break;
                 case "--jars":
@@ -193,13 +207,14 @@ public class ReportMain {
         System.out.println("Crosses agent runtime data with JAR contents to find real conflicts.");
         System.out.println();
         System.out.println("Usage:");
-        System.out.println("  java -jar analyzer-report.jar --runtime <json>[,<json>...] --jars <dir>");
+        System.out.println("  java -jar analyzer-report.jar --runtime <path> --jars <dir>");
         System.out.println();
         System.out.println("Options:");
-        System.out.println("  --runtime <paths>  Agent output JSON(s), comma-separated for multiple files");
+        System.out.println("  --runtime <path>   Agent output: a JSON file, a directory of JSONs, or");
+        System.out.println("                     comma-separated paths (files and/or directories)");
         System.out.println("  --jars <dir>       Directory containing the JARs to analyze");
         System.out.println();
-        System.out.println("When multiple runtime JSONs are provided (e.g., from concurrent Surefire forks),");
+        System.out.println("When multiple JSONs are provided (e.g., from concurrent Surefire forks),");
         System.out.println("they are merged: loaded classes are unioned, never-loaded JARs are intersected.");
     }
 }
