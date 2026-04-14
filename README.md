@@ -54,6 +54,7 @@ Passed as comma-separated `key=value` pairs in the `-javaagent` argument:
 | `label` | _(none)_ | Included in the output filename. Use to distinguish multiple runs (e.g., `fork-1`, `integration`) |
 | `exclude` | `java.:javax.:sun.:jdk.:com.sun.:org.xml.:org.w3c.` | Package prefixes to ignore (colon-separated). Additional prefixes are appended to defaults. |
 | `include-jdk` | `false` | Set to `true` to also capture JDK class loads (removes default excludes) |
+| `events` | `false` | Set to `true` to include individual load events in the JSON output. Off by default to keep output small. |
 | `flush-interval` | `30` | Seconds between partial writes to disk (protection against abrupt shutdown) |
 
 ## Output Format

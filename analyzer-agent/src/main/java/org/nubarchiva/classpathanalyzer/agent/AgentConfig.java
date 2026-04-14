@@ -21,6 +21,7 @@ public class AgentConfig {
     private String label = null;
     private Set<String> excludePrefixes = new HashSet<>(DEFAULT_EXCLUDES);
     private boolean includeJdk = false;
+    private boolean includeEvents = false;
     private int flushIntervalSeconds = 30;
 
     /**
@@ -66,6 +67,9 @@ public class AgentConfig {
                 case "label":
                     config.label = value;
                     break;
+                case "events":
+                    config.includeEvents = Boolean.parseBoolean(value);
+                    break;
                 default:
                     System.err.println("[agent] Unknown parameter: " + key);
                     break;
@@ -89,6 +93,10 @@ public class AgentConfig {
 
     public boolean isIncludeJdk() {
         return includeJdk;
+    }
+
+    public boolean isIncludeEvents() {
+        return includeEvents;
     }
 
     public int getFlushIntervalSeconds() {

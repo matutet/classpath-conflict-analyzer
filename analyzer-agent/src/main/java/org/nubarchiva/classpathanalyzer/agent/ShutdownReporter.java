@@ -75,7 +75,9 @@ public class ShutdownReporter {
     private RuntimeAnalysisResult buildResult() {
         RuntimeAnalysisResult result = new RuntimeAnalysisResult();
         result.setAnalysisTimestamp(Instant.now());
-        result.setLoadEvents(new ArrayList<>(allEvents));
+        if (config.isIncludeEvents()) {
+            result.setLoadEvents(new ArrayList<>(allEvents));
+        }
 
         // Build aggregated maps
         HashMap<String, Set<String>> jarToClasses = new HashMap<>();
