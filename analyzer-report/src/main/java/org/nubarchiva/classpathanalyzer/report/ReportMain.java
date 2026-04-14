@@ -80,17 +80,24 @@ public class ReportMain {
         var scanner = new JarScanner();
         scanner.scan(jarsDir);
 
-        // Analyze conflicts
-        System.err.println("[report] Analyzing conflicts...");
+        // Analyze JAR-vs-JAR conflicts
+        System.err.println("[report] Analyzing JAR conflicts...");
         var analyzer = new ConflictAnalyzer(scanner.getJarToClasses(), merged);
         var conflicts = analyzer.analyzeConflicts();
         System.err.println("[report] " + conflicts.size() + " JAR pairs with duplicate classes");
+
+        // Analyze JAR-vs-JDK conflicts
+        System.err.println("[report] Analyzing JDK conflicts...");
+        var jdkDetector = new JdkConflictDetector();
+        var jdkConflicts = jdkDetector.detect(scanner.getJarToClasses());
+        System.err.println("[report] " + jdkConflicts.size() + " JARs with classes duplicating JDK packages");
         System.err.println();
 
         // Print report to stdout
+        printJdkConflicts(jdkConflicts);
         printConflicts(conflicts);
         printNeverLoaded(merged);
-        printSummary(scanner, merged, conflicts);
+        printSummary(scanner, merged, conflicts, jdkConflicts);
     }
 
     /**
@@ -138,6 +145,25 @@ public class ReportMain {
         merged.setClassLoaderHierarchy(new ArrayList<>(mergedHierarchies));
 
         return merged;
+    }
+
+    private static void printJdkConflicts(List<JdkConflictDetector.JdkConflict> jdkConflicts) {
+        if (jdkConflicts.isEmpty()) return;
+
+        System.out.println("=== JARS DUPLICATING JDK CLASSES ===");
+        System.out.println();
+
+        for (var c : jdkConflicts) {
+            System.out.println(c.jarName + "  <>  JDK module " + c.jdkModule);
+            System.out.println("  " + c.overlappingClasses + " classes in packages provided by the JDK:");
+            for (var cls : c.sampleClasses) {
+                System.out.println("    " + cls);
+            }
+            if (c.overlappingClasses > c.sampleClasses.size()) {
+                System.out.println("    ... and " + (c.overlappingClasses - c.sampleClasses.size()) + " more");
+            }
+            System.out.println();
+        }
     }
 
     private static void printConflicts(List<ConflictAnalyzer.JarPairConflict> conflicts) {
@@ -188,17 +214,19 @@ public class ReportMain {
     }
 
     private static void printSummary(JarScanner scanner, RuntimeAnalysisResult runtime,
-                                     List<ConflictAnalyzer.JarPairConflict> conflicts) {
+                                     List<ConflictAnalyzer.JarPairConflict> conflicts,
+                                     List<JdkConflictDetector.JdkConflict> jdkConflicts) {
         var bothLoaded = conflicts.stream()
                 .filter(c -> c.jarALoaded && c.jarBLoaded)
                 .count();
 
         System.out.println("=== SUMMARY ===");
-        System.out.println("  JARs on disk:          " + scanner.getJarToClasses().size());
-        System.out.println("  JARs loaded at runtime: " + runtime.getJarToLoadedClasses().size());
-        System.out.println("  JARs never loaded:     " + runtime.getNeverLoadedJars().size());
-        System.out.println("  JAR pairs with duplicate classes: " + conflicts.size());
-        System.out.println("  JAR pairs both loaded (conflicts): " + bothLoaded);
+        System.out.println("  JARs on disk:            " + scanner.getJarToClasses().size());
+        System.out.println("  JARs loaded at runtime:  " + runtime.getJarToLoadedClasses().size());
+        System.out.println("  JARs never loaded:       " + runtime.getNeverLoadedJars().size());
+        System.out.println("  JARs duplicating JDK:    " + jdkConflicts.size());
+        System.out.println("  JAR-vs-JAR conflicts:    " + conflicts.size());
+        System.out.println("  JAR-vs-JAR both loaded:  " + bothLoaded);
     }
 
     private static void printUsage() {
