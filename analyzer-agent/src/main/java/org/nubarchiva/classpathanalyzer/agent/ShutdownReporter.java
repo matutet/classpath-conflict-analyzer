@@ -32,6 +32,8 @@ public class ShutdownReporter {
      */
     public void flush() {
         List<ClassLoadEvent> drained = eventQueue.drain();
+        if (drained.isEmpty()) return;
+
         allEvents.addAll(drained);
 
         try {

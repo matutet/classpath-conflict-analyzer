@@ -32,8 +32,6 @@ public class ClasspathAnalyzerAgent {
                 try {
                     Thread.sleep(config.getFlushIntervalSeconds() * 1000L);
                     reporter.flush();
-                    System.err.println("[agent] Partial flush: " +
-                            eventQueue.getTotalCount() + " total events");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
