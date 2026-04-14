@@ -18,14 +18,25 @@ that static analysis tools (`jdeps`, `dependency:analyze`, `maven-enforcer`) can
 # Build
 mvn clean package
 
-# Run your application with the agent
-java -javaagent:analyzer-agent/target/analyzer-agent-1.0.0-SNAPSHOT.jar=output=/tmp/analysis \
-  -cp your-app/target/classes:your-app/target/dependency/* \
-  your.main.Class
+# Run your application with the agent — no parameters needed
+java -javaagent:analyzer-agent/target/analyzer-agent-1.0.0-SNAPSHOT.jar \
+  -jar your-app.jar
 ```
 
-When the JVM shuts down, the agent writes `runtime-analysis-result.json` to the
-output directory.
+The agent works with zero configuration. At startup it prints where the output will go:
+
+```
+[agent] Classpath Conflict Analyzer Agent starting...
+[agent] Output: /tmp/classpath-analyzer
+[agent] Agent ready — intercepting class loads
+```
+
+When the JVM shuts down, the result is written to `runtime-analysis-result.json`
+in that directory. Override the location with `output=`:
+
+```bash
+java -javaagent:analyzer-agent.jar=output=/my/path -jar your-app.jar
+```
 
 ## What It Captures
 
