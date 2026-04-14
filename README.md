@@ -2,15 +2,19 @@
 
 Two tools for understanding classpath conflicts in Java applications:
 
-1. **Agent** — Java agent (`-javaagent`) that captures every class loaded at runtime:
-   which class, from which JAR, by which ClassLoader.
-2. **Report** — Crosses the agent's output with the actual JARs on disk to find
-   duplicate classes, show which JAR "won" each conflict, and identify JARs that
-   were never loaded.
+1. **Agent** (`-javaagent`) — Captures every class loaded at runtime: which class,
+   from which JAR, by which ClassLoader. Produces a JSON file.
+2. **Report** — Crosses the agent's JSON with the actual JARs on disk to find:
+   - JARs that duplicate classes from JDK modules (the cause of ECJ/module errors)
+   - JARs that duplicate classes between each other, and which one "won"
+   - JARs that were never loaded at all
 
 Use them to find out which JARs are really needed at runtime — especially for
 dependencies loaded via ServiceLoader, `Class.forName`, or framework configuration
-that static analysis tools (`jdeps`, `dependency:analyze`, `maven-enforcer`) cannot see.
+that static tools (`jdeps`, `dependency:analyze`, `maven-enforcer`) cannot see.
+
+For architecture and design details, see [docs/architecture.md](docs/architecture.md).
+For development, see [docs/development-guide.md](docs/development-guide.md).
 
 ## Quick Start
 
@@ -31,29 +35,12 @@ The agent works with zero configuration. At startup it prints where the output w
 [agent] Agent ready — intercepting class loads
 ```
 
-When the JVM shuts down, the result is written to `runtime-analysis-result.json`
-in that directory. Override the location with `output=`:
+When the JVM shuts down, the result is in `runtime-analysis-result.json`.
+Override the location with `output=`:
 
 ```bash
 java -javaagent:analyzer-agent.jar=output=/my/path -jar your-app.jar
 ```
-
-## What It Captures
-
-For every class loaded (excluding JDK internals by default):
-
-- **Class name** (FQCN)
-- **Source JAR** — which JAR provided the class
-- **ClassLoader** — name and full delegation hierarchy
-- **Thread** — which thread triggered the load
-- **Timestamp**
-
-The final report aggregates this into:
-
-- **jarToLoadedClasses** — for each JAR, which of its classes were actually loaded
-- **neverLoadedJars** — JARs on the classpath that contributed zero loaded classes
-- **conflictResolutions** — for each class, which JAR "won" (was loaded first)
-- **classLoaderHierarchy** — all unique ClassLoader chains observed
 
 ## Agent Parameters
 
@@ -63,60 +50,28 @@ Passed as comma-separated `key=value` pairs in the `-javaagent` argument:
 |---|---|---|
 | `output` | `$TMPDIR/classpath-analyzer` | Directory for JSON output |
 | `label` | _(none)_ | Included in the output filename. Use to distinguish multiple runs (e.g., `fork-1`, `integration`) |
-| `exclude` | `java.:javax.:sun.:jdk.:com.sun.:org.xml.:org.w3c.` | Package prefixes to ignore (colon-separated). Additional prefixes are appended to defaults. |
+| `exclude` | `java.:javax.:sun.:jdk.:com.sun.:org.xml.:org.w3c.` | Package prefixes to ignore (colon-separated). Additional prefixes are appended to defaults |
 | `include-jdk` | `false` | Set to `true` to also capture JDK class loads (removes default excludes) |
-| `events` | `false` | Set to `true` to include individual load events in the JSON output. Off by default to keep output small. |
-| `flush-interval` | `30` | Seconds between partial writes to disk (protection against abrupt shutdown) |
+| `events` | `false` | Set to `true` to include individual load events in the JSON. Off by default to keep output small |
+| `flush-interval` | `30` | Seconds between writes to disk (protection against abrupt shutdown) |
 
-## Output Format
+## Agent Output Format
 
-The agent writes `runtime-analysis-result.json` (overwritten periodically as a safety net
-against abrupt shutdown). Fields:
+The JSON file contains:
 
-| Field | Type | What it tells you |
-|---|---|---|
-| `analysisTimestamp` | ISO 8601 | When the report was generated |
-| `jarToLoadedClasses` | `{jar: [classes]}` | For each JAR, which of its classes were actually loaded. If a JAR is here, something used it. |
-| `neverLoadedJars` | `[jars]` | JARs present on `java.class.path` that contributed zero loaded classes. These are candidates for removal. |
-| `conflictResolutions` | `{class: jar}` | When a class exists in multiple JARs, which JAR "won" (was loaded first by the ClassLoader). |
-| `classLoaderHierarchy` | `[chains]` | All unique ClassLoader delegation chains observed (e.g., `WebAppClassLoader -> AppClassLoader -> BootstrapClassLoader`). |
-| `loadEvents` | `[events]` | Raw list of every class load event (class, JAR, ClassLoader, thread, timestamp). Large — use `jarToLoadedClasses` and `neverLoadedJars` for summaries. |
-
-## Example
-
-```bash
-java -javaagent:analyzer-agent-1.0.0-SNAPSHOT.jar=output=/tmp/analysis,flush-interval=10 \
-  -jar my-legacy-app.jar
-```
-
-Output (`/tmp/analysis/runtime-analysis-result.json`):
-
-```json
-{
-  "analysisTimestamp": "2026-04-14T16:00:00Z",
-  "jarToLoadedClasses": {
-    "spring-core-5.3.jar": ["org.springframework.core.SpringVersion", "..."],
-    "slf4j-simple-2.0.9.jar": ["org.slf4j.simple.SimpleLogger", "..."]
-  },
-  "neverLoadedJars": [
-    "commons-collections-3.2.2.jar",
-    "xml-apis-1.4.01.jar"
-  ],
-  "conflictResolutions": {
-    "org.w3c.dom.Document": "xercesImpl-2.12.2.jar"
-  },
-  "classLoaderHierarchy": [
-    "jdk.internal.loader.ClassLoaders$AppClassLoader -> ... -> BootstrapClassLoader"
-  ]
-}
-```
+| Field | What it tells you |
+|---|---|
+| `jarToLoadedClasses` | For each JAR, which of its classes were loaded. If a JAR is here, something used it. |
+| `neverLoadedJars` | JARs on `java.class.path` that contributed zero loaded classes. |
+| `conflictResolutions` | When a class exists in multiple JARs, which JAR was loaded first. |
+| `classLoaderHierarchy` | All unique ClassLoader delegation chains observed. |
+| `loadEvents` | Individual load events (only when `events=true`). |
 
 ## Conflict Report
 
-After running the agent, use the report tool to cross the runtime data with the JARs
-on disk and find the real conflicts.
+After running the agent, use the report tool to find the real conflicts.
 
-First, extract all dependency JARs to a directory (if you haven't already):
+First, extract all dependency JARs to a directory:
 
 ```bash
 cd /path/to/your/project
@@ -127,27 +82,30 @@ Then run the report:
 
 ```bash
 java -jar analyzer-report/target/analyzer-report-1.0.0-SNAPSHOT.jar \
-  --runtime /tmp/analysis/runtime-analysis-result.json \
-  --jars /path/to/your/project/target/dependency
+  --runtime /tmp/classpath-analyzer/runtime-analysis-result.json \
+  --jars target/dependency
 ```
 
-The `--runtime` argument accepts a single file, a directory (loads all `*.json` inside),
-or comma-separated paths mixing both:
+The `--runtime` argument accepts a file, a directory (loads all `*.json` inside),
+or comma-separated paths:
 
 ```bash
-# Single file
-java -jar analyzer-report.jar --runtime /tmp/analysis/runtime-analysis-result.json --jars target/dependency
-
-# Directory (loads all *.json files)
-java -jar analyzer-report.jar --runtime /tmp/analysis --jars target/dependency
-
-# Multiple files (e.g., from concurrent Surefire forks)
-java -jar analyzer-report.jar --runtime result-fork-1.json,result-fork-2.json --jars target/dependency
+# Directory (loads all *.json files — useful for concurrent forks)
+java -jar analyzer-report.jar --runtime target/classpath-analysis --jars target/dependency
 ```
 
-Output:
+### Report output
 
 ```
+=== JARS DUPLICATING JDK CLASSES ===
+
+xml-apis-1.4.01.jar  <>  JDK module java.xml
+  183 classes in packages provided by the JDK:
+    org.w3c.dom.Document
+    org.w3c.dom.Element
+    org.xml.sax.SAXException
+    ... and 178 more
+
 === CONFLICTS: JARS WITH DUPLICATE CLASSES ===
 
 xercesImpl-2.12.2.jar  <>  xml-apis-1.4.01.jar *** BOTH LOADED ***
@@ -167,25 +125,20 @@ xercesImpl-2.12.2.jar  <>  xml-apis-1.4.01.jar *** BOTH LOADED ***
   unused-legacy-lib-1.0.jar
 
 === SUMMARY ===
-  JARs on disk:          45
-  JARs loaded at runtime: 41
-  JARs never loaded:     4
-  JAR pairs with duplicate classes: 12
-  JAR pairs both loaded (conflicts): 3
+  JARs on disk:            45
+  JARs loaded at runtime:  41
+  JARs never loaded:       4
+  JARs duplicating JDK:    3
+  JAR-vs-JAR conflicts:    12
+  JAR-vs-JAR both loaded:  3
 ```
-
-This tells you:
-- Which JAR pairs share classes and which JAR "won" each conflict
-- Whether each JAR also has exclusive classes that were loaded (meaning you can't just remove it)
-- Which JARs were never loaded at all
 
 ## Use Cases
 
 ### Standalone application
 
 ```bash
-java -javaagent:analyzer-agent.jar=output=/tmp/analysis \
-  -jar my-app.jar
+java -javaagent:analyzer-agent.jar -jar my-app.jar
 ```
 
 ### Maven Surefire (unit tests)
@@ -195,7 +148,7 @@ java -javaagent:analyzer-agent.jar=output=/tmp/analysis \
     <groupId>org.apache.maven.plugins</groupId>
     <artifactId>maven-surefire-plugin</artifactId>
     <configuration>
-        <argLine>-javaagent:/path/to/analyzer-agent.jar=output=${project.build.directory}/classpath-analysis</argLine>
+        <argLine>-javaagent:${settings.localRepository}/org/nubarchiva/tools/analyzer-agent/1.0.0-SNAPSHOT/analyzer-agent-1.0.0-SNAPSHOT.jar=output=${project.build.directory}/classpath-analysis</argLine>
     </configuration>
 </plugin>
 ```
@@ -207,7 +160,7 @@ java -javaagent:analyzer-agent.jar=output=/tmp/analysis \
     <groupId>org.apache.maven.plugins</groupId>
     <artifactId>maven-failsafe-plugin</artifactId>
     <configuration>
-        <argLine>-javaagent:/path/to/analyzer-agent.jar=output=${project.build.directory}/classpath-analysis,label=integration</argLine>
+        <argLine>-javaagent:${settings.localRepository}/org/nubarchiva/tools/analyzer-agent/1.0.0-SNAPSHOT/analyzer-agent-1.0.0-SNAPSHOT.jar=output=${project.build.directory}/classpath-analysis,label=integration</argLine>
     </configuration>
 </plugin>
 ```
@@ -220,67 +173,45 @@ Surefire's `${surefire.forkNumber}` to avoid output collisions:
 ```xml
 <configuration>
     <forkCount>4</forkCount>
-    <argLine>-javaagent:/path/to/analyzer-agent.jar=output=${project.build.directory}/classpath-analysis,label=fork-${surefire.forkNumber}</argLine>
+    <argLine>-javaagent:${settings.localRepository}/org/nubarchiva/tools/analyzer-agent/1.0.0-SNAPSHOT/analyzer-agent-1.0.0-SNAPSHOT.jar=output=${project.build.directory}/classpath-analysis,label=fork-${surefire.forkNumber}</argLine>
 </configuration>
 ```
 
-This produces separate files: `runtime-analysis-result-fork-1.json`,
-`runtime-analysis-result-fork-2.json`, etc. Point the report tool at the directory:
+Then point the report at the output directory:
 
 ```bash
-java -jar analyzer-report.jar \
-  --runtime target/classpath-analysis \
-  --jars target/dependency
+java -jar analyzer-report.jar --runtime target/classpath-analysis --jars target/dependency
 ```
 
-The report merges them automatically: loaded classes are unioned (a class loaded in any
-fork counts as loaded), never-loaded JARs are intersected (only JARs never loaded in
-ALL forks are reported as never loaded).
+The report merges all JSONs automatically: loaded classes are unioned, never-loaded
+JARs are intersected.
 
 ### Spring Boot
 
 ```bash
-java -javaagent:analyzer-agent.jar=output=/tmp/analysis \
-  -jar my-spring-boot-app.jar
+java -javaagent:analyzer-agent.jar -jar my-spring-boot-app.jar
 ```
 
 ### Application server (Tomcat, Jetty standalone)
 
-Add the agent to `JAVA_OPTS` or `CATALINA_OPTS`:
-
 ```bash
-export CATALINA_OPTS="-javaagent:/path/to/analyzer-agent.jar=output=/tmp/analysis"
+export CATALINA_OPTS="-javaagent:/path/to/analyzer-agent.jar"
 ```
 
 ### Docker
 
-Add the agent JAR to the image and reference it in the entrypoint:
-
 ```dockerfile
 COPY analyzer-agent.jar /opt/agent/analyzer-agent.jar
-ENV JAVA_TOOL_OPTIONS="-javaagent:/opt/agent/analyzer-agent.jar=output=/tmp/analysis"
+ENV JAVA_TOOL_OPTIONS="-javaagent:/opt/agent/analyzer-agent.jar"
 ```
 
-`JAVA_TOOL_OPTIONS` is picked up automatically by all JVMs, no entrypoint changes needed.
-
-## Design
-
-The agent is a single fat JAR with all dependencies (Jackson, shared models) relocated
-via `maven-shade-plugin` to avoid version conflicts with the analyzed application:
-
-```
-com.fasterxml.jackson → org.nubarchiva.classpathanalyzer.agent.shaded.jackson
-```
-
-It registers a `ClassFileTransformer` that **observes but never modifies** bytecode.
-A `ThreadLocal` guard prevents `ClassCircularityError` from recursive class loading.
-Events accumulate in a lock-free `ConcurrentLinkedQueue` with automatic throttling
-(1-in-10 sampling) if the queue exceeds 100,000 events.
+`JAVA_TOOL_OPTIONS` is picked up automatically by all JVMs.
 
 ## Prerequisites
 
-- Java 11+
-- Maven 3.8+ (to build)
+- **Agent**: Java 8+ (compatible with Java 8 through 21+)
+- **Report**: Java 11+
+- **Build**: Maven 3.8+
 
 ## License
 

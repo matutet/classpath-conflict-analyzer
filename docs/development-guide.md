@@ -19,7 +19,7 @@ analyzer-common (Java 8)  ←── analyzer-agent (Java 8, shaded)
 
 - **analyzer-common** — `ClassLoadEvent`, `RuntimeAnalysisResult`, `JsonSerializer`
 - **analyzer-agent** — Fat JAR with shade + relocation. MANIFEST has `Premain-Class` and `Can-Retransform-Classes: true`.
-- **analyzer-report** — Fat JAR. Reads agent JSON + scans JARs on disk to produce conflict report.
+- **analyzer-report** — Fat JAR. Reads agent JSON(s) + scans JARs on disk to produce conflict report.
 
 ## Key Classes
 
@@ -31,8 +31,9 @@ analyzer-common (Java 8)  ←── analyzer-agent (Java 8, shaded)
 - `ShutdownReporter` — Aggregates and writes results at flush/shutdown
 
 ### Report
-- `ReportMain` — CLI entry point, loads/merges runtime JSONs
-- `ConflictAnalyzer` — Crosses JAR contents with runtime data to find duplicates
+- `ReportMain` — CLI entry point, loads/merges runtime JSONs, orchestrates output
+- `JdkConflictDetector` — Finds JARs with classes in JDK module packages (`ModuleLayer.boot()`)
+- `ConflictAnalyzer` — Finds duplicate classes between JARs, crosses with runtime data
 - `JarScanner` — Indexes classes inside each JAR file
 
 ## Verify the agent MANIFEST
@@ -60,5 +61,6 @@ Should show relocated packages under `org/nubarchiva/classpathanalyzer/agent/sha
 Any new dependency MUST be relocated in `analyzer-agent/pom.xml` to avoid conflicts
 with the analyzed application. Add a `<relocation>` block in the shade plugin config.
 
-`jackson-datatype-jsr310` is currently a transitive dependency of `analyzer-common`.
-If that dependency changes, it must be declared explicitly in `analyzer-agent/pom.xml`.
+`jackson-datatype-jsr310` is currently declared explicitly in `analyzer-agent/pom.xml`
+(needed for `Instant` serialization). If additional Jackson modules are needed, declare
+and relocate them the same way.
