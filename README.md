@@ -24,7 +24,7 @@ java -javaagent:analyzer-agent/target/analyzer-agent-1.0.0-SNAPSHOT.jar=output=/
   your.main.Class
 ```
 
-When the JVM shuts down, the agent writes `runtime-analysis-result-final.json` to the
+When the JVM shuts down, the agent writes `runtime-analysis-result.json` to the
 output directory.
 
 ## What It Captures
@@ -59,8 +59,8 @@ Passed as comma-separated `key=value` pairs in the `-javaagent` argument:
 
 ## Output Format
 
-The agent writes `runtime-analysis-result-final.json` (and periodic `*-partial.json`
-snapshots). Fields:
+The agent writes `runtime-analysis-result.json` (overwritten periodically as a safety net
+against abrupt shutdown). Fields:
 
 | Field | Type | What it tells you |
 |---|---|---|
@@ -78,7 +78,7 @@ java -javaagent:analyzer-agent-1.0.0-SNAPSHOT.jar=output=/tmp/analysis,flush-int
   -jar my-legacy-app.jar
 ```
 
-Output (`/tmp/analysis/runtime-analysis-result-final.json`):
+Output (`/tmp/analysis/runtime-analysis-result.json`):
 
 ```json
 {
@@ -116,7 +116,7 @@ Then run the report:
 
 ```bash
 java -jar analyzer-report/target/analyzer-report-1.0.0-SNAPSHOT.jar \
-  --runtime /tmp/analysis/runtime-analysis-result-final.json \
+  --runtime /tmp/analysis/runtime-analysis-result.json \
   --jars /path/to/your/project/target/dependency
 ```
 
@@ -124,7 +124,7 @@ Multiple JSON files (e.g., from concurrent Surefire forks) can be comma-separate
 
 ```bash
 java -jar analyzer-report.jar \
-  --runtime result-fork-1-final.json,result-fork-2-final.json \
+  --runtime result-fork-1.json,result-fork-2.json \
   --jars target/dependency
 ```
 
@@ -207,12 +207,12 @@ Surefire's `${surefire.forkNumber}` to avoid output collisions:
 </configuration>
 ```
 
-This produces separate files: `runtime-analysis-result-fork-1-final.json`,
-`runtime-analysis-result-fork-2-final.json`, etc. Pass them all to the report tool:
+This produces separate files: `runtime-analysis-result-fork-1.json`,
+`runtime-analysis-result-fork-2.json`, etc. Pass them all to the report tool:
 
 ```bash
 java -jar analyzer-report.jar \
-  --runtime target/classpath-analysis/runtime-analysis-result-fork-1-final.json,target/classpath-analysis/runtime-analysis-result-fork-2-final.json \
+  --runtime target/classpath-analysis/runtime-analysis-result-fork-1.json,target/classpath-analysis/runtime-analysis-result-fork-2.json \
   --jars target/dependency
 ```
 

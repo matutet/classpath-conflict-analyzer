@@ -37,7 +37,7 @@ public class ShutdownReporter {
         allEvents.addAll(drained);
 
         try {
-            writeResult("partial");
+            writeResult();
         } catch (IOException e) {
             System.err.println("[agent] Error writing partial snapshot: " + e.getMessage());
         }
@@ -56,20 +56,20 @@ public class ShutdownReporter {
         System.err.println("[agent] Dropped events (throttle): " + eventQueue.getDroppedCount());
 
         try {
-            writeResult("final");
+            writeResult();
             System.err.println("[agent] Result written to: " + config.getOutputDir());
         } catch (IOException e) {
             System.err.println("[agent] ERROR writing final result: " + e.getMessage());
         }
     }
 
-    private void writeResult(String suffix) throws IOException {
+    private void writeResult() throws IOException {
         RuntimeAnalysisResult result = buildResult();
         Files.createDirectories(config.getOutputDir());
         String label = config.getLabel();
         String fileName = "runtime-analysis-result"
                 + (label != null ? "-" + label : "")
-                + "-" + suffix + ".json";
+                + ".json";
         Path outputFile = config.getOutputDir().resolve(fileName);
         JsonSerializer.writeToFile(result, outputFile);
     }
