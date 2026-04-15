@@ -11,15 +11,28 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * Writes accumulated results to disk. Runs:
- * - Periodically according to flush-interval (partial writes)
- * - On JVM shutdown via shutdown hook (final write)
+ * Writes accumulated results to disk. Aggregates events incrementally on each flush
+ * to keep memory bounded: only unique JARs, classes and ClassLoader chains are retained,
+ * not individual events.
  */
 public class ShutdownReporter {
 
     private final EventQueue eventQueue;
     private final AgentConfig config;
-    private final List<ClassLoadEvent> allEvents = Collections.synchronizedList(new ArrayList<>());
+
+    // Incrementally aggregated data — bounded by unique JARs/classes, not event count
+    private final Map<String, Set<String>> jarToClasses =
+            Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, String> conflictResolutions =
+            Collections.synchronizedMap(new HashMap<>());
+    private final Set<String> classLoaderHierarchies =
+            Collections.synchronizedSet(new LinkedHashSet<>());
+
+    // Only populated when events=true
+    private final List<ClassLoadEvent> allEvents =
+            Collections.synchronizedList(new ArrayList<>());
+
+    private long aggregatedCount = 0;
 
     public ShutdownReporter(EventQueue eventQueue, AgentConfig config) {
         this.eventQueue = eventQueue;
@@ -27,33 +40,37 @@ public class ShutdownReporter {
     }
 
     /**
-     * Drains pending events from the queue and accumulates them internally.
-     * Writes a partial snapshot to disk.
+     * Drains pending events, aggregates them into the running maps, and writes to disk.
+     * Individual events are discarded after aggregation (unless events=true).
      */
-    public void flush() {
+    public synchronized void flush() {
         List<ClassLoadEvent> drained = eventQueue.drain();
         if (drained.isEmpty()) return;
 
-        allEvents.addAll(drained);
+        aggregate(drained);
 
         try {
             writeResult();
         } catch (IOException e) {
-            System.err.println("[agent] Error writing partial snapshot: " + e.getMessage());
+            System.err.println("[agent] Error writing snapshot: " + e.getMessage());
         }
     }
 
     /**
-     * Final write: drains everything, builds the complete result and writes it.
+     * Final write: drains everything, aggregates, and writes.
      */
-    public void finalWrite() {
+    public synchronized void finalWrite() {
         List<ClassLoadEvent> drained = eventQueue.drain();
-        allEvents.addAll(drained);
+        if (!drained.isEmpty()) {
+            aggregate(drained);
+        }
 
         System.err.println("[agent] === Agent summary ===");
-        System.err.println("[agent] Captured events: " + allEvents.size());
+        System.err.println("[agent] Aggregated events: " + aggregatedCount);
         System.err.println("[agent] Total events (including throttle): " + eventQueue.getTotalCount());
         System.err.println("[agent] Dropped events (throttle): " + eventQueue.getDroppedCount());
+        System.err.println("[agent] Unique JARs loaded: " + jarToClasses.size());
+        System.err.println("[agent] Unique classes loaded: " + conflictResolutions.size());
 
         try {
             writeResult();
@@ -63,46 +80,50 @@ public class ShutdownReporter {
         }
     }
 
-    private void writeResult() throws IOException {
-        RuntimeAnalysisResult result = buildResult();
-        Files.createDirectories(config.getOutputDir());
-        String label = config.getLabel();
-        String fileName = "runtime-analysis-result"
-                + (label != null ? "-" + label : "")
-                + ".json";
-        Path outputFile = config.getOutputDir().resolve(fileName);
-        JsonSerializer.writeToFile(result, outputFile);
-    }
-
-    private RuntimeAnalysisResult buildResult() {
-        RuntimeAnalysisResult result = new RuntimeAnalysisResult();
-        result.setAnalysisTimestamp(Instant.now());
-        if (config.isIncludeEvents()) {
-            result.setLoadEvents(new ArrayList<>(allEvents));
-        }
-
-        // Build aggregated maps
-        HashMap<String, Set<String>> jarToClasses = new HashMap<>();
-        LinkedHashSet<String> classLoaderHierarchies = new LinkedHashSet<>();
-        HashMap<String, String> conflictResolutions = new HashMap<>();
-
-        for (ClassLoadEvent event : allEvents) {
+    private void aggregate(List<ClassLoadEvent> events) {
+        for (ClassLoadEvent event : events) {
             if (event.getSourceJar() != null) {
-                jarToClasses.computeIfAbsent(event.getSourceJar(), k -> new HashSet<>())
+                jarToClasses.computeIfAbsent(event.getSourceJar(), k ->
+                        Collections.synchronizedSet(new HashSet<>()))
                         .add(event.getClassName());
-                // The first JAR to load the class is the "winner"
                 conflictResolutions.putIfAbsent(event.getClassName(), event.getSourceJar());
             }
             if (event.getClassLoaderHierarchy() != null) {
                 classLoaderHierarchies.add(event.getClassLoaderHierarchy());
             }
         }
+        aggregatedCount += events.size();
 
-        result.setJarToLoadedClasses(jarToClasses);
-        result.setConflictResolutions(conflictResolutions);
-        result.setClassLoaderHierarchy(new ArrayList<>(classLoaderHierarchies));
+        if (config.isIncludeEvents()) {
+            allEvents.addAll(events);
+        }
+        // When events=false, individual events are discarded here — only aggregated data remains
+    }
 
-        // Calculate neverLoadedJars: JARs in the classpath that did not load any class
+    private void writeResult() throws IOException {
+        RuntimeAnalysisResult result = new RuntimeAnalysisResult();
+        result.setAnalysisTimestamp(Instant.now());
+
+        if (config.isIncludeEvents()) {
+            result.setLoadEvents(new ArrayList<>(allEvents));
+        }
+
+        // Copy aggregated maps (snapshot under synchronization)
+        synchronized (jarToClasses) {
+            HashMap<String, Set<String>> copy = new HashMap<>();
+            for (Map.Entry<String, Set<String>> entry : jarToClasses.entrySet()) {
+                copy.put(entry.getKey(), new HashSet<>(entry.getValue()));
+            }
+            result.setJarToLoadedClasses(copy);
+        }
+        synchronized (conflictResolutions) {
+            result.setConflictResolutions(new HashMap<>(conflictResolutions));
+        }
+        synchronized (classLoaderHierarchies) {
+            result.setClassLoaderHierarchy(new ArrayList<>(classLoaderHierarchies));
+        }
+
+        // Calculate neverLoadedJars
         HashSet<String> neverLoaded = new HashSet<>();
         String classPath = System.getProperty("java.class.path", "");
         String separator = System.getProperty("path.separator", ":");
@@ -120,6 +141,12 @@ public class ShutdownReporter {
         }
         result.setNeverLoadedJars(neverLoaded);
 
-        return result;
+        Files.createDirectories(config.getOutputDir());
+        String label = config.getLabel();
+        String fileName = "runtime-analysis-result"
+                + (label != null ? "-" + label : "")
+                + ".json";
+        Path outputFile = config.getOutputDir().resolve(fileName);
+        JsonSerializer.writeToFile(result, outputFile);
     }
 }
