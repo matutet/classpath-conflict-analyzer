@@ -5,6 +5,7 @@ import org.nubarchiva.classpathanalyzer.common.model.ClassLoadEvent;
 import java.lang.instrument.ClassFileTransformer;
 import java.net.URL;
 import java.security.ProtectionDomain;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * ClassFileTransformer that intercepts the loading of each class to record
@@ -20,6 +21,7 @@ public class ClassLoadInterceptor implements ClassFileTransformer {
 
     private final EventQueue eventQueue;
     private final AgentConfig config;
+    private final ConcurrentHashMap<ClassLoader, String> hierarchyCache = new ConcurrentHashMap<>();
 
     public ClassLoadInterceptor(EventQueue eventQueue, AgentConfig config) {
         this.eventQueue = eventQueue;
@@ -65,7 +67,8 @@ public class ClassLoadInterceptor implements ClassFileTransformer {
             // Record ClassLoader
             if (loader != null) {
                 event.setClassLoaderName(loader.getClass().getName());
-                event.setClassLoaderHierarchy(buildClassLoaderHierarchy(loader));
+                event.setClassLoaderHierarchy(
+                        hierarchyCache.computeIfAbsent(loader, this::buildClassLoaderHierarchy));
             } else {
                 event.setClassLoaderName("BootstrapClassLoader");
             }
@@ -76,7 +79,7 @@ public class ClassLoadInterceptor implements ClassFileTransformer {
             // Catch any error to avoid interfering with the application
             // Do not use logging to prevent recursion
         } finally {
-            ACTIVE.set(Boolean.FALSE);
+            ACTIVE.remove();
         }
 
         // Never transform bytecode

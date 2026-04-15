@@ -4,11 +4,13 @@ import org.nubarchiva.classpathanalyzer.common.model.ClassLoadEvent;
 import org.nubarchiva.classpathanalyzer.common.model.RuntimeAnalysisResult;
 import org.nubarchiva.classpathanalyzer.common.util.JsonSerializer;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * Writes accumulated results to disk. Aggregates events incrementally on each flush
@@ -126,14 +128,9 @@ public class ShutdownReporter {
         // Calculate neverLoadedJars
         HashSet<String> neverLoaded = new HashSet<>();
         String classPath = System.getProperty("java.class.path", "");
-        String separator = System.getProperty("path.separator", ":");
-        for (String entry : classPath.split(separator)) {
+        for (String entry : classPath.split(Pattern.quote(File.pathSeparator))) {
             if (entry.endsWith(".jar")) {
-                String jarName = entry.contains("/")
-                        ? entry.substring(entry.lastIndexOf('/') + 1)
-                        : entry.contains("\\")
-                                ? entry.substring(entry.lastIndexOf('\\') + 1)
-                                : entry;
+                String jarName = new File(entry).getName();
                 if (!jarToClasses.containsKey(jarName)) {
                     neverLoaded.add(jarName);
                 }

@@ -37,8 +37,8 @@ public class EventQueue {
             }
         }
 
-        queue.add(event);
         long pending = pendingCount.incrementAndGet();
+        queue.add(event);
 
         if (pending > THROTTLE_THRESHOLD && !throttling.getAndSet(true)) {
             System.err.println("[agent] WARNING: queue size exceeded " + THROTTLE_THRESHOLD +
